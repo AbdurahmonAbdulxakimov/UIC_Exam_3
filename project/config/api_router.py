@@ -1,15 +1,10 @@
 from django.conf import settings
-from rest_framework.routers import DefaultRouter, SimpleRouter
+from django.urls import path
 
-from users.api.views import UserViewSet
-
-if settings.DEBUG:
-    router = DefaultRouter()
-else:
-    router = SimpleRouter()
-
-router.register("users", UserViewSet)
+from products import views as prodcut_views
 
 
 app_name = "api"
-urlpatterns = router.urls
+urlpatterns = [
+    path("", prodcut_views.ResultView.as_view()),
+]
