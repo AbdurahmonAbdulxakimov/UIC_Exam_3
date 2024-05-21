@@ -1,36 +1,42 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from django.db.models import Subquery, OuterRef, F, Value
+from django.db.models import OuterRef, F, Value
 from django.db.models.functions import JSONObject
 from django.contrib.postgres.expressions import ArraySubquery
+
+import json
 
 from products import models, serializers
 
 
 class ResultView(APIView):
     def post(self, request, *args, **kwargs):
-        code = request.data.get("code")
-        quantity = float(request.data.get("quantity"))
+        codes = request.data.get("codes")
+        quantities = request.data.get("quantities")
+        qs = models.Product.objects.none()
+        products = []
 
-        qs = models.Product.objects.filter(code=code).annotate(
-            quantity=Value(quantity),
-            required_materials=ArraySubquery(
-                models.ProductMaterial.objects.filter(product_id=OuterRef("id"))
-                .annotate(
-                    total_quantity=F("quantity") * quantity,
-                    json=JSONObject(
-                        name="material__name",
-                        quantity="total_quantity",
-                    ),
-                )
-                .values("json")
-            ),
-        )
+        for i in range(len(codes)):
+            code = codes[i]
+            quantity = float(quantities[i])
 
-        serializer = serializers.ProductMaterialsNeededSerializer(qs, many=True)
+            qs = models.Product.objects.filter(code=code).annotate(
+                quantity=Value(quantity),
+                required_materials=ArraySubquery(
+                    models.ProductMaterial.objects.filter(product_id=OuterRef("id"))
+                    .annotate(
+                        total_quantity=F("quantity") * quantity,
+                        json=JSONObject(
+                            name="material__name",
+                            quantity="total_quantity",
+                        ),
+                    )
+                    .values("json")
+                ),
+            )
+            products += serializers.ProductMaterialsNeededSerializer(qs, many=True).data
 
-        # Determine from which warehouses we can obtain the required quantities of each material
         warehouses = (
             models.Warehouse.objects.select_related("material")
             .all()
@@ -39,7 +45,7 @@ class ResultView(APIView):
         )
         result = []
 
-        for product in serializer.data:
+        for product in products:
             product_materials = []
             for material in product.get("required_materials"):
                 material_name = material.get("name")
@@ -51,7 +57,6 @@ class ResultView(APIView):
                         break
                     if warehouse.get("material_name") != material_name:
                         continue
-
                     qty_to_take = min(warehouse.get("remainder"), remaining_qty)
                     product_materials.append(
                         {
